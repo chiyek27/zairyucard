@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Data Spreadsheet</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #f0f4f8;
+      color: #1a202c;
+      min-height: 100vh;
+      padding: 32px 16px;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    header {
+      margin-bottom: 24px;
+    }
+
+    header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #1a56db;
+    }
+
+    header p {
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin-top: 4px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      overflow: hidden;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      border-bottom: 1px solid #e5e7eb;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .toolbar input {
+      padding: 7px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      width: 240px;
+      outline: none;
+      transition: border 0.2s;
+    }
+
+    .toolbar input:focus {
+      border-color: #1a56db;
+    }
+
+    .info {
+      font-size: 0.8rem;
+      color: #6b7280;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+
+    thead tr {
+      background: #1a56db;
+      color: #fff;
+    }
+
+    thead th {
+      padding: 11px 16px;
+      text-align: left;
+      font-weight: 600;
+      white-space: nowrap;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    thead th:hover {
+      background: #1648c0;
+    }
+
+    thead th .sort-icon {
+      margin-left: 4px;
+      opacity: 0.6;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid #f3f4f6;
+      transition: background 0.1s;
+    }
+
+    tbody tr:hover {
+      background: #eff6ff;
+    }
+
+    tbody tr:last-child {
+      border-bottom: none;
+    }
+
+    td {
+      padding: 10px 16px;
+      white-space: nowrap;
+    }
+
+    .status {
+      padding: 32px;
+      text-align: center;
+      color: #6b7280;
+      font-size: 0.9rem;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 22px;
+      height: 22px;
+      border: 3px solid #d1d5db;
+      border-top-color: #1a56db;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error { color: #dc2626; }
+
+    .badge {
+      display: inline-block;
+      background: #dbeafe;
+      color: #1d4ed8;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 99px;
+    }
+
+    .btn-refresh {
+      padding: 7px 14px;
+      background: #1a56db;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .btn-refresh:hover { background: #1648c0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>📊 Data Spreadsheet</h1>
+      <p>Sumber data: Google Sheets — otomatis diperbarui setiap halaman dibuka</p>
+    </header>
+
+    <div class="card">
+      <div class="toolbar">
+        <input type="text" id="search" placeholder="🔍 Cari data..." oninput="filterTable()" />
+        <div style="display:flex;align-items:center;gap:12px">
+          <span class="info" id="row-count"></span>
+          <button class="btn-refresh" onclick="loadData()">↻ Refresh</button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <div class="status" id="status">
+          <span class="spinner"></span> Memuat data...
+        </div>
+        <table id="tabel" style="display:none">
+          <thead id="thead"></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQu7Wi7OioirnX3XOEIieyF8nwMaIUu0q-Xbj3C7CGO8waSH5oS01XHSdT_1j29aTtVG9y7aingjGTB/pub?gid=0&single=true&output=csv";
+
+    let allRows = [];
+    let headers = [];
+    let sortCol = -1;
+    let sortAsc = true;
+
+    function parseCSV(text) {
+      const rows = [];
+      let row = [], cell = '', inQuote = false;
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (ch === '"') {
+          if (inQuote && text[i+1] === '"') { cell += '"'; i++; }
+          else inQuote = !inQuote;
+        } else if (ch === ',' && !inQuote) {
+          row.push(cell.trim()); cell = '';
+        } else if ((ch === '\n' || ch === '\r') && !inQuote) {
+          if (ch === '\r' && text[i+1] === '\n') i++;
+          row.push(cell.trim()); cell = '';
+          if (row.some(c => c !== '')) rows.push(row);
+          row = [];
+        } else {
+          cell += ch;
+        }
+      }
+      if (cell || row.length) { row.push(cell.trim()); if (row.some(c => c !== '')) rows.push(row); }
+      return rows;
+    }
+
+    function renderTable(rows) {
+      const thead = document.getElementById('thead');
+      const tbody = document.getElementById('tbody');
+      thead.innerHTML = '';
+      tbody.innerHTML = '';
+
+      const tr = document.createElement('tr');
+      headers.forEach((h, i) => {
+        const th = document.createElement('th');
+        const icon = sortCol === i ? (sortAsc ? ' ▲' : ' ▼') : ' ⇅';
+        th.innerHTML = h + `<span class="sort-icon">${icon}</span>`;
+        th.onclick = () => sortTable(i);
+        tr.appendChild(th);
+      });
+      thead.appendChild(tr);
+
+      rows.forEach(row => {
+        const tr = document.createElement('tr');
+        headers.forEach((_, i) => {
+          const td = document.createElement('td');
+          td.textContent = row[i] ?? '';
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById('row-count').innerHTML = `<span class="badge">${rows.length} baris</span>`;
+    }
+
+    function filterTable() {
+      const q = document.getElementById('search').value.toLowerCase();
+      const filtered = q
+        ? allRows.filter(r => r.some(c => c.toLowerCase().includes(q)))
+        : allRows;
+      renderTable(filtered);
+    }
+
+    function sortTable(col) {
+      if (sortCol === col) sortAsc = !sortAsc;
+      else { sortCol = col; sortAsc = true; }
+      allRows.sort((a, b) => {
+        const va = a[col] ?? '', vb = b[col] ?? '';
+        const na = parseFloat(va.replace(/[^0-9.-]/g,'')), nb = parseFloat(vb.replace(/[^0-9.-]/g,''));
+        const cmp = (!isNaN(na) && !isNaN(nb)) ? na - nb : va.localeCompare(vb, 'id');
+        return sortAsc ? cmp : -cmp;
+      });
+      filterTable();
+    }
+
+    async function loadData() {
+      const status = document.getElementById('status');
+      const tabel = document.getElementById('tabel');
+      status.innerHTML = '<span class="spinner"></span> Memuat data...';
+      status.style.display = 'block';
+      tabel.style.display = 'none';
+
+      try {
+        const res = await fetch(CSV_URL + '&t=' + Date.now());
+        if (!res.ok) throw new Error('Gagal mengambil data (HTTP ' + res.status + ')');
+        const text = await res.text();
+        const rows = parseCSV(text);
+        if (rows.length < 1) throw new Error('Data kosong atau format tidak dikenali');
+
+        headers = rows[0];
+        allRows = rows.slice(1);
+
+        status.style.display = 'none';
+        tabel.style.display = 'table';
+        filterTable();
+      } catch (err) {
+        status.innerHTML = `<span class="error">❌ Error: ${err.message}</span><br><br><button class="btn-refresh" onclick="loadData()">Coba Lagi</button>`;
+      }
+    }
+
+    loadData();
+  </script>
+</body>
+</html>
