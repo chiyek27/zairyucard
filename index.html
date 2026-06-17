@@ -43,7 +43,7 @@
       border: 1px solid #d1d5db;
       border-radius: 8px;
       font-size: 0.875rem;
-      width: 240px;
+      width: 220px;
       outline: none;
     }
     .toolbar input:focus { border-color: #1a56db; }
@@ -53,7 +53,6 @@
       font-size: 0.75rem; font-weight: 600;
       padding: 2px 8px; border-radius: 99px;
     }
-
     .cache-tag {
       background: #d1fae5; color: #065f46;
       font-size: 0.7rem; font-weight: 600;
@@ -65,10 +64,62 @@
       background: #1a56db; color: #fff;
       border: none; border-radius: 8px;
       font-size: 0.8rem; cursor: pointer;
+      white-space: nowrap;
     }
     .btn:hover { background: #1648c0; }
 
-    /* Virtual scroll container */
+    .btn-outline {
+      padding: 7px 13px;
+      background: #fff; color: #1a56db;
+      border: 1px solid #1a56db; border-radius: 8px;
+      font-size: 0.8rem; cursor: pointer;
+      white-space: nowrap;
+    }
+    .btn-outline:hover { background: #eff6ff; }
+
+    /* Column filter panel */
+    .col-panel {
+      display: none;
+      border-bottom: 1px solid #e5e7eb;
+      padding: 14px 16px;
+      background: #f8fafc;
+    }
+    .col-panel.open { display: block; }
+    .col-panel-title {
+      font-size: 0.8rem; font-weight: 600; color: #374151;
+      margin-bottom: 10px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .col-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .col-chip {
+      display: flex; align-items: center; gap: 5px;
+      padding: 4px 10px;
+      border: 1.5px solid #d1d5db;
+      border-radius: 99px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      background: #fff;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .col-chip.active {
+      background: #1a56db;
+      border-color: #1a56db;
+      color: #fff;
+    }
+    .col-chip input[type=checkbox] { display: none; }
+    .col-actions { display: flex; gap: 6px; margin-top: 12px; }
+    .col-actions button {
+      font-size: 0.75rem; padding: 4px 10px;
+      border: 1px solid #d1d5db; border-radius: 6px;
+      background: #fff; cursor: pointer; color: #374151;
+    }
+    .col-actions button:hover { background: #f3f4f6; }
+
     .table-wrap { overflow-x: auto; }
 
     table {
@@ -89,18 +140,13 @@
     }
     thead th:hover { background: #1648c0; }
 
-    /* Virtual rows wrapper */
     .virtual-body-wrap {
       overflow-y: auto;
       max-height: 520px;
       position: relative;
     }
 
-    .spacer-top, .spacer-bottom { background: transparent; }
-
-    tbody tr {
-      border-bottom: 1px solid #f3f4f6;
-    }
+    tbody tr { border-bottom: 1px solid #f3f4f6; }
     tbody tr:hover { background: #eff6ff; }
     td { padding: 9px 14px; white-space: nowrap; }
 
@@ -110,7 +156,6 @@
       color: #6b7280;
       font-size: 0.9rem;
     }
-
     .spinner {
       display: inline-block;
       width: 20px; height: 20px;
@@ -133,12 +178,27 @@
   </header>
 
   <div class="card">
+    <!-- Toolbar -->
     <div class="toolbar">
       <input type="text" id="search" placeholder="🔍 Cari data..." />
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <button class="btn-outline" onclick="toggleColPanel()" id="btn-col">⚙ Kolom <span id="col-count"></span></button>
         <span id="row-count"></span>
         <span id="cache-indicator"></span>
         <button class="btn" onclick="loadData(true)">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- Column visibility panel -->
+    <div class="col-panel" id="col-panel">
+      <div class="col-panel-title">
+        <span>Pilih kolom yang ditampilkan</span>
+      </div>
+      <div class="col-grid" id="col-grid"></div>
+      <div class="col-actions">
+        <button onclick="setAllCols(true)">✓ Semua</button>
+        <button onclick="setAllCols(false)">✗ Semua</button>
+        <button onclick="toggleColPanel()">Tutup</button>
       </div>
     </div>
 
@@ -159,19 +219,18 @@
 
 <script>
   const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQu7Wi7OioirnX3XOEIieyF8nwMaIUu0q-Xbj3C7CGO8waSH5oS01XHSdT_1j29aTtVG9y7aingjGTB/pub?gid=0&single=true&output=csv";
-  const CACHE_KEY = "gsheet_cache";
-  const CACHE_TTL = 5 * 60 * 1000; // 5 menit
-
+  const CACHE_KEY  = "gsheet_cache";
+  const CACHE_TTL  = 5 * 60 * 1000;
   const ROW_HEIGHT = 38;
   const VISIBLE_BUFFER = 10;
 
-  let allRows = [];
-  let filteredRows = [];
-  let headers = [];
+  let allRows = [], filteredRows = [], headers = [];
+  let visibleCols = [];   // boolean[] — kolom mana yg tampil
   let sortCol = -1, sortAsc = true;
   let debounceTimer = null;
+  let lastStart = -1;
 
-  // ── CSV Parser ──────────────────────────────────────────────
+  // ── CSV Parser ───────────────────────────────────────────────
   function parseCSV(text) {
     const rows = [];
     let row = [], cell = '', inQ = false;
@@ -205,31 +264,74 @@
     return null;
   }
 
+  // ── Column panel ─────────────────────────────────────────────
+  function toggleColPanel() {
+    document.getElementById('col-panel').classList.toggle('open');
+  }
+
+  function buildColPanel() {
+    const grid = document.getElementById('col-grid');
+    grid.innerHTML = '';
+    headers.forEach((h, i) => {
+      const chip = document.createElement('label');
+      chip.className = 'col-chip' + (visibleCols[i] ? ' active' : '');
+      chip.innerHTML = `<input type="checkbox" ${visibleCols[i]?'checked':''} />${escHtml(h)}`;
+      chip.querySelector('input').addEventListener('change', e => {
+        visibleCols[i] = e.target.checked;
+        chip.classList.toggle('active', visibleCols[i]);
+        updateColCount();
+        renderHeader();
+        lastStart = -1;
+        renderVisible();
+      });
+      grid.appendChild(chip);
+    });
+    updateColCount();
+  }
+
+  function setAllCols(val) {
+    visibleCols = headers.map(() => val);
+    buildColPanel();
+    renderHeader();
+    lastStart = -1;
+    renderVisible();
+  }
+
+  function updateColCount() {
+    const on = visibleCols.filter(Boolean).length;
+    document.getElementById('col-count').textContent = `(${on}/${headers.length})`;
+  }
+
+  // active column indices
+  function activeCols() {
+    return headers.map((_, i) => i).filter(i => visibleCols[i]);
+  }
+
   // ── Render header ────────────────────────────────────────────
   function renderHeader() {
     const thead = document.getElementById('thead');
     thead.innerHTML = '';
     const tr = document.createElement('tr');
-    headers.forEach((h, i) => {
+    activeCols().forEach(i => {
       const th = document.createElement('th');
       const icon = sortCol === i ? (sortAsc ? ' ▲' : ' ▼') : ' ⇅';
-      th.innerHTML = h + `<span style="opacity:.6;font-size:.75em">${icon}</span>`;
-      th.onclick = () => { sortBy(i); };
+      th.innerHTML = escHtml(headers[i]) + `<span style="opacity:.6;font-size:.75em">${icon}</span>`;
+      th.onclick = () => sortBy(i);
       tr.appendChild(th);
     });
     thead.appendChild(tr);
   }
 
-  // ── Virtual scroll renderer ──────────────────────────────────
-  let lastStart = -1;
+  // ── Virtual scroll ───────────────────────────────────────────
   function renderVisible() {
     const vscroll = document.getElementById('vscroll');
-    const tbody = document.getElementById('tbody');
+    const tbody   = document.getElementById('tbody');
     const scrollTop = vscroll.scrollTop;
-    const viewH = vscroll.clientHeight;
+    const viewH   = vscroll.clientHeight;
+    const cols    = activeCols();
 
     const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - VISIBLE_BUFFER);
-    const end = Math.min(filteredRows.length, Math.ceil((scrollTop + viewH) / ROW_HEIGHT) + VISIBLE_BUFFER);
+    const end   = Math.min(filteredRows.length, Math.ceil((scrollTop + viewH) / ROW_HEIGHT) + VISIBLE_BUFFER);
 
     if (start === lastStart) return;
     lastStart = start;
@@ -237,26 +339,26 @@
     const topH = start * ROW_HEIGHT;
     const botH = (filteredRows.length - end) * ROW_HEIGHT;
 
-    let html = `<tr class="spacer-top"><td colspan="${headers.length}" style="height:${topH}px;padding:0;border:none"></td></tr>`;
+    let html = `<tr><td colspan="${cols.length}" style="height:${topH}px;padding:0;border:none"></td></tr>`;
     for (let i = start; i < end; i++) {
       html += '<tr>';
-      headers.forEach((_, j) => {
-        html += `<td>${escHtml(filteredRows[i][j] ?? '')}</td>`;
-      });
+      cols.forEach(j => { html += `<td>${escHtml(filteredRows[i][j] ?? '')}</td>`; });
       html += '</tr>';
     }
-    html += `<tr class="spacer-bottom"><td colspan="${headers.length}" style="height:${botH}px;padding:0;border:none"></td></tr>`;
+    html += `<tr><td colspan="${cols.length}" style="height:${botH}px;padding:0;border:none"></td></tr>`;
     tbody.innerHTML = html;
   }
 
   function escHtml(s) {
-    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
   // ── Filter + sort ────────────────────────────────────────────
   function applyFilter() {
     const q = document.getElementById('search').value.toLowerCase().trim();
-    filteredRows = q ? allRows.filter(r => r.some(c => c.toLowerCase().includes(q))) : allRows.slice();
+    filteredRows = q
+      ? allRows.filter(r => r.some(c => c.toLowerCase().includes(q)))
+      : allRows.slice();
     if (sortCol >= 0) {
       filteredRows.sort((a, b) => {
         const va = a[sortCol]??'', vb = b[sortCol]??'';
@@ -278,7 +380,6 @@
     applyFilter();
   }
 
-  // ── Debounce search ──────────────────────────────────────────
   document.getElementById('search').addEventListener('input', () => {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(applyFilter, 200);
@@ -286,20 +387,22 @@
 
   // ── Load data ────────────────────────────────────────────────
   async function loadData(forceRefresh = false) {
-    const status = document.getElementById('status');
-    const wrap = document.getElementById('table-wrap');
+    const status   = document.getElementById('status');
+    const wrap     = document.getElementById('table-wrap');
     const cacheInd = document.getElementById('cache-indicator');
 
     if (!forceRefresh) {
       const cached = loadCache();
       if (cached) {
-        headers = cached.data.headers;
-        allRows = cached.data.rows;
+        headers     = cached.data.headers;
+        allRows     = cached.data.rows;
+        visibleCols = headers.map(() => true);
         const age = Math.round((Date.now() - cached.ts) / 1000);
         cacheInd.innerHTML = `<span class="cache-tag">⚡ Cache ${age}d lalu</span>`;
         status.style.display = 'none';
         wrap.style.display = 'block';
         renderHeader();
+        buildColPanel();
         applyFilter();
         setupScroll();
         return;
@@ -318,14 +421,16 @@
       const rows = parseCSV(text);
       if (rows.length < 1) throw new Error('Data kosong');
 
-      headers = rows[0];
-      allRows = rows.slice(1);
+      headers     = rows[0];
+      allRows     = rows.slice(1);
+      visibleCols = headers.map(() => true);
       saveCache({ headers, rows: allRows });
       cacheInd.innerHTML = `<span class="cache-tag">✓ Data baru</span>`;
 
       status.style.display = 'none';
       wrap.style.display = 'block';
       renderHeader();
+      buildColPanel();
       applyFilter();
       setupScroll();
     } catch(err) {
@@ -337,7 +442,6 @@
     const vscroll = document.getElementById('vscroll');
     vscroll.removeEventListener('scroll', renderVisible);
     vscroll.addEventListener('scroll', renderVisible, { passive: true });
-    // Set total height
     vscroll.querySelector('table').style.minHeight = (filteredRows.length * ROW_HEIGHT) + 'px';
   }
 
