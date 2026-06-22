@@ -137,6 +137,7 @@
       white-space: nowrap;
       cursor: pointer;
       user-select: none;
+      background: #1a56db;
     }
     thead th:hover { background: #1648c0; }
 
@@ -144,6 +145,12 @@
       overflow-y: auto;
       max-height: 520px;
       position: relative;
+    }
+
+    thead th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
     }
 
     tbody tr { border-bottom: 1px solid #f3f4f6; }
@@ -168,9 +175,53 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     .error { color: #dc2626; }
+
+    .action-cell {
+      padding: 6px 10px;
+      white-space: nowrap;
+      text-align: center;
+    }
+    .copy-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+      text-decoration: none;
+      line-height: 1;
+    }
+    .copy-btn:hover { opacity: 0.85; transform: scale(1.05); }
+    .copy-btn:active { transform: scale(0.97); }
+    .btn-wa  { background: #e5e7eb; color: #374151; }
+    .copy-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
+
+    .toast {
+      position: fixed;
+      bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+      background: #1a202c; color: #fff;
+      padding: 8px 18px; border-radius: 8px;
+      font-size: 0.8rem; font-weight: 500;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.2s, transform 0.2s;
+      z-index: 9999;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    thead th.th-action {
+      text-align: center;
+      cursor: default;
+      pointer-events: none;
+    }
+    thead th.th-action:hover { background: #1a56db; }
   </style>
 </head>
 <body>
+<div id="toast" class="toast"></div>
 <div class="container">
   <header>
     <h1>📊 Data Spreadsheet</h1>
@@ -205,11 +256,9 @@
     <div id="status" class="status"><span class="spinner"></span> Memuat data...</div>
 
     <div class="table-wrap" id="table-wrap" style="display:none">
-      <table>
-        <thead id="thead"></thead>
-      </table>
       <div class="virtual-body-wrap" id="vscroll">
         <table style="width:100%;border-collapse:collapse;font-size:0.875rem;table-layout:auto">
+          <thead id="thead"></thead>
           <tbody id="tbody"></tbody>
         </table>
       </div>
@@ -312,6 +361,11 @@
     const thead = document.getElementById('thead');
     thead.innerHTML = '';
     const tr = document.createElement('tr');
+    // action column header
+    const thAct = document.createElement('th');
+    thAct.className = 'th-action';
+    thAct.textContent = 'Salin';
+    tr.appendChild(thAct);
     activeCols().forEach(i => {
       const th = document.createElement('th');
       const icon = sortCol === i ? (sortAsc ? ' ▲' : ' ▼') : ' ⇅';
@@ -322,6 +376,33 @@
     thead.appendChild(tr);
   }
 
+  // ── SVG icons ────────────────────────────────────────────────
+  const SVG_WA = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+
+
+  // ── Format baris jadi teks ────────────────────────────────────
+  function rowToText(row) {
+    const cols = activeCols();
+    const values = cols.map(j => row[j] ?? '').filter(v => v !== '');
+    return '■ ' + values.join(' | ') + ' |';
+  }
+
+  // ── Toast ─────────────────────────────────────────────────────
+  let toastTimer = null;
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2000);
+  }
+
+  // ── Copy handlers ─────────────────────────────────────────────
+  function copyForWA(rowIdx) {
+    const text = rowToText(filteredRows[rowIdx]);
+    navigator.clipboard.writeText(text).then(() => showToast('✅ Disalin!'));
+  }
+
   // ── Virtual scroll ───────────────────────────────────────────
   function renderVisible() {
     const vscroll = document.getElementById('vscroll');
@@ -329,6 +410,7 @@
     const scrollTop = vscroll.scrollTop;
     const viewH   = vscroll.clientHeight;
     const cols    = activeCols();
+    const totalCols = cols.length + 1; // +1 for action col
 
     const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - VISIBLE_BUFFER);
     const end   = Math.min(filteredRows.length, Math.ceil((scrollTop + viewH) / ROW_HEIGHT) + VISIBLE_BUFFER);
@@ -339,13 +421,17 @@
     const topH = start * ROW_HEIGHT;
     const botH = (filteredRows.length - end) * ROW_HEIGHT;
 
-    let html = `<tr><td colspan="${cols.length}" style="height:${topH}px;padding:0;border:none"></td></tr>`;
+    let html = `<tr><td colspan="${totalCols}" style="height:${topH}px;padding:0;border:none"></td></tr>`;
     for (let i = start; i < end; i++) {
-      html += '<tr>';
+      const absIdx = i;
+      html += `<tr>
+        <td class="action-cell">
+          <button class="copy-btn btn-wa" onclick="copyForWA(${absIdx})" title="Copy baris">${SVG_WA}</button>
+        </td>`;
       cols.forEach(j => { html += `<td>${escHtml(filteredRows[i][j] ?? '')}</td>`; });
       html += '</tr>';
     }
-    html += `<tr><td colspan="${cols.length}" style="height:${botH}px;padding:0;border:none"></td></tr>`;
+    html += `<tr><td colspan="${totalCols}" style="height:${botH}px;padding:0;border:none"></td></tr>`;
     tbody.innerHTML = html;
   }
 
@@ -442,7 +528,7 @@
     const vscroll = document.getElementById('vscroll');
     vscroll.removeEventListener('scroll', renderVisible);
     vscroll.addEventListener('scroll', renderVisible, { passive: true });
-    vscroll.querySelector('table').style.minHeight = (filteredRows.length * ROW_HEIGHT) + 'px';
+    vscroll.querySelector('tbody').style.minHeight = (filteredRows.length * ROW_HEIGHT) + 'px';
   }
 
   loadData();
