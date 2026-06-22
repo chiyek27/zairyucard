@@ -383,7 +383,8 @@
   // ── Format baris jadi teks ────────────────────────────────────
   function rowToText(row) {
     const cols = activeCols();
-    return cols.map(j => `*${headers[j]}:* ${row[j] ?? ''}`).join('\n');
+    const values = cols.map(j => row[j] ?? '').filter(v => v !== '');
+    return '■ ' + values.join(' | ') + ' |';
   }
 
   // ── Toast ─────────────────────────────────────────────────────
