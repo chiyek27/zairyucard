@@ -174,9 +174,54 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     .error { color: #dc2626; }
+
+    .action-cell {
+      padding: 6px 10px;
+      white-space: nowrap;
+      text-align: center;
+    }
+    .copy-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+      text-decoration: none;
+      line-height: 1;
+    }
+    .copy-btn:hover { opacity: 0.85; transform: scale(1.05); }
+    .copy-btn:active { transform: scale(0.97); }
+    .btn-wa  { background: #25d366; color: #fff; margin-right: 4px; }
+    .btn-tg  { background: #229ed9; color: #fff; }
+    .copy-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
+
+    .toast {
+      position: fixed;
+      bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+      background: #1a202c; color: #fff;
+      padding: 8px 18px; border-radius: 8px;
+      font-size: 0.8rem; font-weight: 500;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.2s, transform 0.2s;
+      z-index: 9999;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    thead th.th-action {
+      text-align: center;
+      cursor: default;
+      pointer-events: none;
+    }
+    thead th.th-action:hover { background: #1a56db; }
   </style>
 </head>
 <body>
+<div id="toast" class="toast"></div>
 <div class="container">
   <header>
     <h1>📊 Data Spreadsheet</h1>
@@ -316,6 +361,11 @@
     const thead = document.getElementById('thead');
     thead.innerHTML = '';
     const tr = document.createElement('tr');
+    // action column header
+    const thAct = document.createElement('th');
+    thAct.className = 'th-action';
+    thAct.textContent = 'Kirim';
+    tr.appendChild(thAct);
     activeCols().forEach(i => {
       const th = document.createElement('th');
       const icon = sortCol === i ? (sortAsc ? ' ▲' : ' ▼') : ' ⇅';
@@ -326,6 +376,37 @@
     thead.appendChild(tr);
   }
 
+  // ── SVG icons ────────────────────────────────────────────────
+  const SVG_WA = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.127.558 4.122 1.532 5.852L.057 23.885a.5.5 0 0 0 .606.606l6.148-1.53A11.945 11.945 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.885 0-3.652-.518-5.166-1.418l-.371-.22-3.849.959.975-3.764-.242-.389A9.96 9.96 0 0 1 2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/></svg>`;
+  const SVG_TG = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>`;
+
+  // ── Format baris jadi teks ────────────────────────────────────
+  function rowToText(row) {
+    const cols = activeCols();
+    return cols.map(j => `*${headers[j]}:* ${row[j] ?? ''}`).join('\n');
+  }
+
+  // ── Toast ─────────────────────────────────────────────────────
+  let toastTimer = null;
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2000);
+  }
+
+  // ── Copy handlers ─────────────────────────────────────────────
+  function copyForWA(rowIdx) {
+    const text = rowToText(filteredRows[rowIdx]);
+    navigator.clipboard.writeText(text).then(() => showToast('✅ Disalin untuk WhatsApp!'));
+  }
+  function copyForTG(rowIdx) {
+    // Telegram mendukung markdown sederhana dengan tanda bintang
+    const text = rowToText(filteredRows[rowIdx]);
+    navigator.clipboard.writeText(text).then(() => showToast('✅ Disalin untuk Telegram!'));
+  }
+
   // ── Virtual scroll ───────────────────────────────────────────
   function renderVisible() {
     const vscroll = document.getElementById('vscroll');
@@ -333,6 +414,7 @@
     const scrollTop = vscroll.scrollTop;
     const viewH   = vscroll.clientHeight;
     const cols    = activeCols();
+    const totalCols = cols.length + 1; // +1 for action col
 
     const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - VISIBLE_BUFFER);
     const end   = Math.min(filteredRows.length, Math.ceil((scrollTop + viewH) / ROW_HEIGHT) + VISIBLE_BUFFER);
@@ -343,13 +425,18 @@
     const topH = start * ROW_HEIGHT;
     const botH = (filteredRows.length - end) * ROW_HEIGHT;
 
-    let html = `<tr><td colspan="${cols.length}" style="height:${topH}px;padding:0;border:none"></td></tr>`;
+    let html = `<tr><td colspan="${totalCols}" style="height:${topH}px;padding:0;border:none"></td></tr>`;
     for (let i = start; i < end; i++) {
-      html += '<tr>';
+      const absIdx = i;
+      html += `<tr>
+        <td class="action-cell">
+          <button class="copy-btn btn-wa" onclick="copyForWA(${absIdx})" title="Copy untuk WhatsApp">${SVG_WA} WA</button>
+          <button class="copy-btn btn-tg" onclick="copyForTG(${absIdx})" title="Copy untuk Telegram">${SVG_TG} TG</button>
+        </td>`;
       cols.forEach(j => { html += `<td>${escHtml(filteredRows[i][j] ?? '')}</td>`; });
       html += '</tr>';
     }
-    html += `<tr><td colspan="${cols.length}" style="height:${botH}px;padding:0;border:none"></td></tr>`;
+    html += `<tr><td colspan="${totalCols}" style="height:${botH}px;padding:0;border:none"></td></tr>`;
     tbody.innerHTML = html;
   }
 
